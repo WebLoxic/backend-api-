@@ -4,7 +4,8 @@ from typing import Optional, List
 from datetime import datetime
 from sqlalchemy import text
 from app.db import SessionLocal
-from app.main import get_current_user_row
+from app.deps import get_current_user_row
+
 
 router = APIRouter(prefix="/auto-order", tags=["AutoOrder"])
 

@@ -33,3 +33,5 @@ async def publish_signal(data: dict):
     """Send ML prediction to all WebSocket clients"""
     print("📡 PUBLISH:", data)
     await manager.broadcast_json(data)
+
+

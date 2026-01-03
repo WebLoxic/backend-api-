@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List
 
-from app.main import get_current_user_row
+from app.deps import get_current_user_row
+
 from app.services.portfolio_rebalancer import rebalance_preview
 from app.services.portfolio_executor import execute_rebalance
 

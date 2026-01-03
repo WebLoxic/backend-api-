@@ -8,7 +8,8 @@ from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.schemas import OrderCreate, OrderResponse
-from app.main import get_current_user_row
+from app.deps import get_current_user_row
+
 from app.services.trading_engine import process_fill
 
 router = APIRouter(prefix="/trades", tags=["Trades"])

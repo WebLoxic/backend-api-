@@ -1741,9 +1741,301 @@
 
 
 
+# # app/crud.py
+# """
+# Unified CRUD for subscriptions, rewards, referrals, leaderboard, and help module.
+# """
+
+# from typing import Optional, Dict, Any, List
+# from datetime import datetime, timedelta
+
+# from sqlalchemy.orm import Session
+# from sqlalchemy import desc, func
+
+# from app.db import SessionLocal
+# from app import models
+
+# try:
+#     from dateutil.relativedelta import relativedelta
+#     _HAS_RELD = True
+# except ImportError:
+#     _HAS_RELD = False
+
+
+# # -------------------------------------------------
+# # HELPERS
+# # -------------------------------------------------
+# def _now() -> datetime:
+#     return datetime.utcnow()
+
+
+# def normalize_billing(billing: str) -> str:
+#     if not billing:
+#         return "monthly"
+#     b = billing.lower()
+#     if b in ("monthly", "month", "m"):
+#         return "monthly"
+#     if b in ("yearly", "annual", "y"):
+#         return "yearly"
+#     return "monthly"
+
+
+# def add_interval(dt: datetime, billing: str) -> datetime:
+#     if _HAS_RELD:
+#         return dt + (relativedelta(months=1) if billing == "monthly" else relativedelta(years=1))
+#     return dt + (timedelta(days=30) if billing == "monthly" else timedelta(days=365))
+
+
+# # =================================================
+# # SUBSCRIPTIONS CRUD
+# # =================================================
+# def create_pending_subscription(
+#     user_id: int,
+#     plan_id: int,
+#     billing_cycle: str,
+#     meta: Optional[Dict[str, Any]] = None,
+#     db: Optional[Session] = None,
+# ):
+#     own = False
+#     session = db or SessionLocal()
+#     if db is None:
+#         own = True
+
+#     try:
+#         sub = models.UserSubscription(
+#             user_id=user_id,
+#             plan_id=plan_id,
+#             billing_cycle=normalize_billing(billing_cycle),
+#             status="pending",
+#             meta=meta or {},
+#             created_at=_now(),
+#             updated_at=_now(),
+#         )
+#         session.add(sub)
+#         session.commit()
+#         session.refresh(sub)
+#         return sub
+#     finally:
+#         if own:
+#             session.close()
+
+
+# def activate_subscription(
+#     subscription_id: int,
+#     payment_id: str,
+#     provider: str = "razorpay",
+#     provider_payload: Optional[Dict[str, Any]] = None,
+#     db: Optional[Session] = None,
+# ):
+#     own = False
+#     session = db or SessionLocal()
+#     if db is None:
+#         own = True
+
+#     try:
+#         sub = (
+#             session.query(models.UserSubscription)
+#             .filter(models.UserSubscription.id == subscription_id)
+#             .with_for_update()
+#             .first()
+#         )
+#         if not sub:
+#             return None
+
+#         sub.status = "active"
+#         sub.start_at = _now()
+#         sub.end_at = add_interval(sub.start_at, sub.billing_cycle)
+#         sub.external_payment_id = payment_id
+#         sub.updated_at = _now()
+
+#         meta = sub.meta or {}
+#         meta["provider"] = provider
+#         meta["provider_payload"] = provider_payload or {}
+#         sub.meta = meta
+
+#         session.commit()
+#         session.refresh(sub)
+#         return sub
+#     finally:
+#         if own:
+#             session.close()
+
+
+# def get_active_subscription(user_id: int, db: Optional[Session] = None):
+#     own = False
+#     session = db or SessionLocal()
+#     if db is None:
+#         own = True
+
+#     try:
+#         now = _now()
+#         return (
+#             session.query(models.UserSubscription)
+#             .filter(
+#                 models.UserSubscription.user_id == user_id,
+#                 models.UserSubscription.status == "active",
+#                 models.UserSubscription.start_at <= now,
+#                 models.UserSubscription.end_at > now,
+#             )
+#             .order_by(desc(models.UserSubscription.end_at))
+#             .first()
+#         )
+#     finally:
+#         if own:
+#             session.close()
+
+
+# # =================================================
+# # REWARDS CRUD (MATCHES YOUR DB + MODELS)
+# # =================================================
+# def list_rewards(db: Session) -> List[models.Reward]:
+#     return (
+#         db.query(models.Reward)
+#         .filter(models.Reward.active == True)
+#         .order_by(desc(models.Reward.created_at))
+#         .all()
+#     )
+
+
+# def get_reward(db: Session, reward_id: int) -> Optional[models.Reward]:
+#     return db.query(models.Reward).filter(models.Reward.id == reward_id).first()
+
+
+# def list_user_rewards(
+#     db: Session,
+#     user_id: int,
+#     active_only: bool = True,
+# ) -> List[models.UserReward]:
+#     q = (
+#         db.query(models.UserReward)
+#         .join(models.Reward)
+#         .filter(models.UserReward.user_id == user_id)
+#     )
+
+#     if active_only:
+#         q = q.filter(models.Reward.active == True)
+
+#     return q.all()
+
+
+# def assign_reward_to_user(
+#     db: Session,
+#     user_id: int,
+#     reward_id: int,
+# ) -> models.UserReward:
+#     user_reward = models.UserReward(
+#         user_id=user_id,
+#         reward_id=reward_id,
+#         claimed=True,
+#         claimed_at=_now(),
+#         created_at=_now(),
+#     )
+#     db.add(user_reward)
+#     db.commit()
+#     db.refresh(user_reward)
+#     return user_reward
+
+
+# # =================================================
+# # REFERRALS CRUD (FIXED & CLEAN)
+# # =================================================
+# def list_user_referrals(
+#     db: Session,
+#     user_id: int,
+# ) -> List[models.Referral]:
+#     return (
+#         db.query(models.Referral)
+#         .filter(
+#             (models.Referral.referrer_id == user_id)
+#             | (models.Referral.referee_id == user_id)
+#         )
+#         .order_by(desc(models.Referral.created_at))
+#         .all()
+#     )
+
+
+# def assign_referral_reward(
+#     db: Session,
+#     referral_id: int,
+#     reward_id: Optional[int] = None,
+# ) -> Optional[models.Referral]:
+#     ref = (
+#         db.query(models.Referral)
+#         .filter(models.Referral.id == referral_id)
+#         .with_for_update()
+#         .first()
+#     )
+
+#     if not ref or ref.claimed:
+#         return None
+
+#     ref.claimed = True
+#     ref.claimed_at = _now()
+#     ref.reward_id = reward_id
+
+#     db.commit()
+#     db.refresh(ref)
+#     return ref
+
+
+# # =================================================
+# # LEADERBOARD
+# # =================================================
+# def get_leaderboard(db: Session) -> List[Dict[str, Any]]:
+#     rows = (
+#         db.query(
+#             models.UserReward.user_id,
+#             func.count(models.UserReward.id).label("rewards_claimed"),
+#         )
+#         .group_by(models.UserReward.user_id)
+#         .order_by(desc(func.count(models.UserReward.id)))
+#         .all()
+#     )
+
+#     return [
+#         {"user_id": r.user_id, "rewards_claimed": r.rewards_claimed}
+#         for r in rows
+#     ]
+
+
+# # =================================================
+# # HELP MODULE CRUD
+# # =================================================
+# def list_help_categories(db: Session):
+#     return db.query(models.HelpCategory).all()
+
+
+# def list_help_articles(
+#     db: Session,
+#     category_id: Optional[int] = None,
+#     active_only: bool = True,
+# ):
+#     q = db.query(models.HelpArticle)
+
+#     if category_id:
+#         q = q.filter(models.HelpArticle.category_id == category_id)
+
+#     if active_only:
+#         q = q.filter(models.HelpArticle.is_active == True)
+
+#     return q.order_by(desc(models.HelpArticle.created_at)).all()
+
+
+# def get_help_article(db: Session, article_id: int):
+#     return (
+#         db.query(models.HelpArticle)
+#         .filter(models.HelpArticle.id == article_id)
+#         .first()
+#     )
+
+
+
+
+
 # app/crud.py
 """
-Unified CRUD for subscriptions, rewards, referrals, leaderboard, and help module.
+FINAL PRODUCTION CRUD
+Subscriptions, Rewards, Referrals, Leaderboard, Help
 """
 
 from typing import Optional, Dict, Any, List
@@ -1762,9 +2054,9 @@ except ImportError:
     _HAS_RELD = False
 
 
-# -------------------------------------------------
+# =================================================
 # HELPERS
-# -------------------------------------------------
+# =================================================
 def _now() -> datetime:
     return datetime.utcnow()
 
@@ -1787,7 +2079,7 @@ def add_interval(dt: datetime, billing: str) -> datetime:
 
 
 # =================================================
-# SUBSCRIPTIONS CRUD
+# SUBSCRIPTIONS CRUD (✔ FULL & SAFE)
 # =================================================
 def create_pending_subscription(
     user_id: int,
@@ -1796,10 +2088,8 @@ def create_pending_subscription(
     meta: Optional[Dict[str, Any]] = None,
     db: Optional[Session] = None,
 ):
-    own = False
     session = db or SessionLocal()
-    if db is None:
-        own = True
+    own = db is None
 
     try:
         sub = models.UserSubscription(
@@ -1827,10 +2117,8 @@ def activate_subscription(
     provider_payload: Optional[Dict[str, Any]] = None,
     db: Optional[Session] = None,
 ):
-    own = False
     session = db or SessionLocal()
-    if db is None:
-        own = True
+    own = db is None
 
     try:
         sub = (
@@ -1849,8 +2137,10 @@ def activate_subscription(
         sub.updated_at = _now()
 
         meta = sub.meta or {}
-        meta["provider"] = provider
-        meta["provider_payload"] = provider_payload or {}
+        meta.update({
+            "provider": provider,
+            "provider_payload": provider_payload or {}
+        })
         sub.meta = meta
 
         session.commit()
@@ -1862,10 +2152,8 @@ def activate_subscription(
 
 
 def get_active_subscription(user_id: int, db: Optional[Session] = None):
-    own = False
     session = db or SessionLocal()
-    if db is None:
-        own = True
+    own = db is None
 
     try:
         now = _now()
@@ -1885,10 +2173,72 @@ def get_active_subscription(user_id: int, db: Optional[Session] = None):
             session.close()
 
 
+# 🔥 THIS WAS MISSING (ROOT CAUSE FIX)
+def get_all_subscriptions(user_id: int, db: Session):
+    return (
+        db.query(models.UserSubscription)
+        .filter(models.UserSubscription.user_id == user_id)
+        .order_by(desc(models.UserSubscription.created_at))
+        .all()
+    )
+
+
+# ---------------- ADMIN ----------------
+def admin_list_subscriptions(
+    status: Optional[str] = None,
+    db: Optional[Session] = None,
+):
+    session = db or SessionLocal()
+    own = db is None
+
+    try:
+        q = session.query(models.UserSubscription)
+        if status:
+            q = q.filter(models.UserSubscription.status == status)
+        return q.order_by(desc(models.UserSubscription.created_at)).all()
+    finally:
+        if own:
+            session.close()
+
+
+def cancel_subscription(
+    subscription_id: int,
+    admin_note: Optional[str] = None,
+    db: Optional[Session] = None,
+):
+    session = db or SessionLocal()
+    own = db is None
+
+    try:
+        sub = (
+            session.query(models.UserSubscription)
+            .filter(models.UserSubscription.id == subscription_id)
+            .with_for_update()
+            .first()
+        )
+        if not sub:
+            return None
+
+        sub.status = "cancelled"
+        sub.updated_at = _now()
+
+        meta = sub.meta or {}
+        if admin_note:
+            meta["admin_note"] = admin_note
+        sub.meta = meta
+
+        session.commit()
+        session.refresh(sub)
+        return sub
+    finally:
+        if own:
+            session.close()
+
+
 # =================================================
-# REWARDS CRUD (MATCHES YOUR DB + MODELS)
+# REWARDS CRUD
 # =================================================
-def list_rewards(db: Session) -> List[models.Reward]:
+def list_rewards(db: Session):
     return (
         db.query(models.Reward)
         .filter(models.Reward.active == True)
@@ -1897,52 +2247,39 @@ def list_rewards(db: Session) -> List[models.Reward]:
     )
 
 
-def get_reward(db: Session, reward_id: int) -> Optional[models.Reward]:
+def get_reward(db: Session, reward_id: int):
     return db.query(models.Reward).filter(models.Reward.id == reward_id).first()
 
 
-def list_user_rewards(
-    db: Session,
-    user_id: int,
-    active_only: bool = True,
-) -> List[models.UserReward]:
+def list_user_rewards(db: Session, user_id: int, active_only: bool = True):
     q = (
         db.query(models.UserReward)
         .join(models.Reward)
         .filter(models.UserReward.user_id == user_id)
     )
-
     if active_only:
         q = q.filter(models.Reward.active == True)
-
     return q.all()
 
 
-def assign_reward_to_user(
-    db: Session,
-    user_id: int,
-    reward_id: int,
-) -> models.UserReward:
-    user_reward = models.UserReward(
+def assign_reward_to_user(db: Session, user_id: int, reward_id: int):
+    ur = models.UserReward(
         user_id=user_id,
         reward_id=reward_id,
         claimed=True,
         claimed_at=_now(),
         created_at=_now(),
     )
-    db.add(user_reward)
+    db.add(ur)
     db.commit()
-    db.refresh(user_reward)
-    return user_reward
+    db.refresh(ur)
+    return ur
 
 
 # =================================================
-# REFERRALS CRUD (FIXED & CLEAN)
+# REFERRALS
 # =================================================
-def list_user_referrals(
-    db: Session,
-    user_id: int,
-) -> List[models.Referral]:
+def list_user_referrals(db: Session, user_id: int):
     return (
         db.query(models.Referral)
         .filter(
@@ -1954,18 +2291,13 @@ def list_user_referrals(
     )
 
 
-def assign_referral_reward(
-    db: Session,
-    referral_id: int,
-    reward_id: Optional[int] = None,
-) -> Optional[models.Referral]:
+def assign_referral_reward(db: Session, referral_id: int, reward_id: Optional[int] = None):
     ref = (
         db.query(models.Referral)
         .filter(models.Referral.id == referral_id)
         .with_for_update()
         .first()
     )
-
     if not ref or ref.claimed:
         return None
 
@@ -1981,7 +2313,7 @@ def assign_referral_reward(
 # =================================================
 # LEADERBOARD
 # =================================================
-def get_leaderboard(db: Session) -> List[Dict[str, Any]]:
+def get_leaderboard(db: Session):
     rows = (
         db.query(
             models.UserReward.user_id,
@@ -1991,39 +2323,24 @@ def get_leaderboard(db: Session) -> List[Dict[str, Any]]:
         .order_by(desc(func.count(models.UserReward.id)))
         .all()
     )
-
-    return [
-        {"user_id": r.user_id, "rewards_claimed": r.rewards_claimed}
-        for r in rows
-    ]
+    return [{"user_id": r.user_id, "rewards_claimed": r.rewards_claimed} for r in rows]
 
 
 # =================================================
-# HELP MODULE CRUD
+# HELP MODULE
 # =================================================
 def list_help_categories(db: Session):
     return db.query(models.HelpCategory).all()
 
 
-def list_help_articles(
-    db: Session,
-    category_id: Optional[int] = None,
-    active_only: bool = True,
-):
+def list_help_articles(db: Session, category_id: Optional[int] = None, active_only: bool = True):
     q = db.query(models.HelpArticle)
-
     if category_id:
         q = q.filter(models.HelpArticle.category_id == category_id)
-
     if active_only:
         q = q.filter(models.HelpArticle.is_active == True)
-
     return q.order_by(desc(models.HelpArticle.created_at)).all()
 
 
 def get_help_article(db: Session, article_id: int):
-    return (
-        db.query(models.HelpArticle)
-        .filter(models.HelpArticle.id == article_id)
-        .first()
-    )
+    return db.query(models.HelpArticle).filter(models.HelpArticle.id == article_id).first()

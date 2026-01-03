@@ -4,7 +4,8 @@ from pydantic import BaseModel
 from typing import List
 
 from app.db import SessionLocal
-from app.main import get_current_user_row
+from app.deps import get_current_user_row
+
 
 router = APIRouter(
     prefix="/admin/pnl",

@@ -109,7 +109,9 @@ from typing import List
 
 from app.db import SessionLocal
 from app.schemas import PositionOut
-from app.auth import get_current_user_row
+from app.api.auth_routes import get_current_user
+from app.deps import get_current_user_row
+
 
 router = APIRouter(
     prefix="/portfolio",
