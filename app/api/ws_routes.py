@@ -1,30 +1,22 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-import asyncio
-import json
+from fastapi import APIRouter, WebSocket
+from app.streamer import market_broadcaster, ui_streamer
 
 router = APIRouter()
 
-@router.websocket("/ws/market")
-async def ws_market(websocket: WebSocket):
-    await websocket.accept()
+@router.websocket("/ws/market-raw/{token}")
+async def ws_market_raw(ws: WebSocket, token: int):
+    await market_broadcaster.connect(token, ws)
     try:
         while True:
-            await websocket.send_json({"type": "market", "msg": "market data ok"})
-            await asyncio.sleep(1)
-    except WebSocketDisconnect:
-        print("Market WS disconnected")
-    except Exception as e:
-        print("Market WS error:", e)
+            await ws.receive_text()  # keep alive
+    except:
+        market_broadcaster.disconnect(token, ws)
 
-
-@router.websocket("/ws/signals")
-async def ws_signals(websocket: WebSocket):
-    await websocket.accept()
+@router.websocket("/ws/market-ui/{token}")
+async def ws_market_ui(ws: WebSocket, token: int):
+    await ui_streamer.connect(token, ws)
     try:
         while True:
-            await websocket.send_json({"type": "signal", "msg": "signal update"})
-            await asyncio.sleep(1)
-    except WebSocketDisconnect:
-        print("Signals WS disconnected")
-    except Exception as e:
-        print("Signals WS error:", e)
+            await ws.receive_text()
+    except:
+        ui_streamer.disconnect(token, ws)

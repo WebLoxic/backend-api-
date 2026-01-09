@@ -1,13 +1,12 @@
 from datetime import datetime
-from zoneinfo import ZoneInfo
+import pytz
 
-IST = ZoneInfo("Asia/Kolkata")
-UTC = ZoneInfo("UTC")
+IST = pytz.timezone("Asia/Kolkata")
 
 def ist_now():
     return datetime.now(IST)
 
-def ist_to_utc(dt):
+def to_ist(dt: datetime):
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=IST)
-    return dt.astimezone(UTC)
+        dt = pytz.utc.localize(dt)
+    return dt.astimezone(IST)
